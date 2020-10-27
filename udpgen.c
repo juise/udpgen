@@ -40,7 +40,7 @@
  Packet structure:
  4 bytes for seq | n bytes for Data | 2 bytes for checksum
 
- Usage: ./udpgen [-v] -[s|c] [-n NUM_PACKET] [-l PACKET_LENGTH_IN_BYTES] [-b BANDWIDTH_IN_BYTES_PER_SEC] IPADDRESS PORT
+ Usage: ./udpgen [-v] -[s|c] [-n NUM_PACKET] [-l PACKET_LENGTH_IN_BYTES] [-b BANDWIDTH_IN_BYTES_PER_SEC] [-C CONNS] IPADDRESS PORT
  -v means verbose
 
  e.g.
@@ -53,7 +53,7 @@
  ============================================================================
  */
 
-#define USAGE "Usage: %s [-v] -[s|c] [-n NUM_PACKET] [-l PACKET_LENGTH_IN_BYTES] [-b BANDWIDTH_IN_BYTES_PER_SEC] IPADDRESS PORT\n"
+#define USAGE "Usage: %s [-v] -[s|c] [-n NUM_PACKET] [-l PACKET_LENGTH_IN_BYTES] [-b BANDWIDTH_IN_BYTES_PER_SEC] [-C CONNS] IPADDRESS PORT\n"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -136,11 +136,12 @@ int main(int argc, // Number of strings in array argv
 	int port = 5556;
 	int verbose = 0;
 	int numpkt = 0;
+    int conns = 1;
 	char c;
 	printf("================================================\n");
 	printf("IP TRAFFIC GENERATOR\n");
 	while (1) {
-		if ((c = getopt(argc, argv, "scn:l:b:hv")) == EOF)
+		if ((c = getopt(argc, argv, "scn:l:b:C:hv")) == EOF)
 			break;
 		switch (c) {
 		case 'v':
@@ -160,6 +161,9 @@ int main(int argc, // Number of strings in array argv
 			break;
 		case 'n':
 			numpkt = atol(optarg);
+			break;
+		case 'C':
+			conns = atol(optarg);
 			break;
 		case 'h':
 		default:
@@ -209,15 +213,19 @@ int main(int argc, // Number of strings in array argv
 	int* seq = (int*) buffertotal;
 	char* buffer = buffertotal;
 	uint16_t* sum = (uint16_t*) (buffer + size);
+	int* socks = (int*) malloc(conns * sizeof(int));
 	// Temp var for loop
 	int i;
 
-	// Create socket
-	sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (-1 == sock) /* if socket failed to initialize, exit */
-	{
-		printf("Error creating socket.\n");
-		exit(EXIT_FAILURE);
+	for (i = 0; i < conns; i++) {
+		// Create socket
+		sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+		if (-1 == sock) /* if socket failed to initialize, exit */
+		{
+			printf("Error creating socket.\n");
+			exit(EXIT_FAILURE);
+		}
+		socks[i] = sock;
 	}
 
 	memset(&sa, 0, sizeof sa);
@@ -231,8 +239,7 @@ int main(int argc, // Number of strings in array argv
 	signal(SIGINT, &sighandler);
 
 	//Prepare buffer
-	char
-			* str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+	char * str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 	int len = strlen(str);
 	int offset = 4;
 
@@ -261,17 +268,18 @@ int main(int argc, // Number of strings in array argv
 						"SENDING PACKET SEQ#[%d] LENGTH [%d] BYTES BANDWIDTH [%f] BYTES/SEC\n",
 						num, plen, bw);
 			}
-			bytes_sent = sendto(sock, buffer, total, 0, (struct sockaddr*) &sa,
-					sizeof sa);
-			int interval = (int) (1000000.0 * plen / bw);
-			usleep(interval);
-			if (bytes_sent < 0) {
-				fprintf(stderr, "Error sending packet.\n");
-				close(sock);
-				exit(EXIT_FAILURE);
+			for (i = 0; i < conns; i++) {
+				bytes_sent = sendto(socks[i], buffer, total, 0, (struct sockaddr*) &sa, sizeof sa);
+				int interval = (int) (1000000.0 * plen / bw / conns);
+				usleep(interval);
+				if (bytes_sent < 0) {
+					fprintf(stderr, "Error sending packet.\n");
+					close(socks[i]);
+					exit(EXIT_FAILURE);
+				}
+				num++;
+				*seq = htonl(num);
 			}
-			num++;
-			*seq = htonl(num);
 		}
 		if (numpkt != 0) {
 			*seq = htonl(0xffffffff);
