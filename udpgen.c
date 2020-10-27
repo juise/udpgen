@@ -53,7 +53,7 @@
  ============================================================================
  */
 
-#define USAGE "Usage: %s [-v] -[s|c] [-n NUM_PACKET] [-l PACKET_LENGTH_IN_BYTES] [-b BANDWIDTH_IN_BYTES_PER_SEC] [-C CONNS] IPADDRESS PORT\n"
+#define USAGE "Usage: %s [-v] -[s|c] [-n NUM_PACKET] [-l PACKET_LENGTH_IN_BYTES] [-b BANDWIDTH_IN_BYTES_PER_SEC] [-C CONNS] [-R RATE] IPADDRESS PORT\n"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -136,12 +136,13 @@ int main(int argc, // Number of strings in array argv
 	int port = 5556;
 	int verbose = 0;
 	int numpkt = 0;
-    int conns = 1;
+	int conns = 1;
+	int rate = 0;
 	char c;
 	printf("================================================\n");
 	printf("IP TRAFFIC GENERATOR\n");
 	while (1) {
-		if ((c = getopt(argc, argv, "scn:l:b:C:hv")) == EOF)
+		if ((c = getopt(argc, argv, "scn:l:b:C:R:hv")) == EOF)
 			break;
 		switch (c) {
 		case 'v':
@@ -165,6 +166,9 @@ int main(int argc, // Number of strings in array argv
 		case 'C':
 			conns = atol(optarg);
 			break;
+		case 'R':
+			rate = atol(optarg);
+			break;
 		case 'h':
 		default:
 			printf(USAGE, argv[0]);
@@ -180,11 +184,16 @@ int main(int argc, // Number of strings in array argv
 	}
 
 	printf("PACKET LENGTH: %d BYTES\n", plen);
-	if (mode == MODE_CLIENT) {
-		printf("BANDWIDTH: %0.2f BYTES/SEC\n", bw);
-	}
-	if (mode == MODE_CLIENT && numpkt != 0) {
-		printf("NUM PACKET: %d PACKETS\n", numpkt);
+	printf("CONNECTIONS: %d\n", conns);
+	if (rate > 0) {
+		printf("MESSAGES PER SECOND IN A CONNECTION: %d\n", rate);
+	} else {
+		if (mode == MODE_CLIENT) {
+			printf("BANDWIDTH: %0.2f BYTES/SEC\n", bw);
+		}
+		if (mode == MODE_CLIENT && numpkt != 0) {
+			printf("NUM PACKET: %d PACKETS\n", numpkt);
+		}
 	}
 
 	// Get ip address
@@ -260,6 +269,14 @@ int main(int argc, // Number of strings in array argv
 		ssize_t bytes_sent;
 		int num = 0;
 		printf("SENDING...\n");
+
+		int interval = 0;
+		if (rate > 0) {
+			interval = (int) (1000000.0 / rate / conns);
+		} else {
+			interval = (int) (1000000.0 * plen / bw / conns);
+		}
+
 		for (; num < numpkt || numpkt == 0;) {
 			*sum = csum((unsigned short *) buffer, size);
 			*sum = htons(*sum);
@@ -270,7 +287,6 @@ int main(int argc, // Number of strings in array argv
 			}
 			for (i = 0; i < conns; i++) {
 				bytes_sent = sendto(socks[i], buffer, total, 0, (struct sockaddr*) &sa, sizeof sa);
-				int interval = (int) (1000000.0 * plen / bw / conns);
 				usleep(interval);
 				if (bytes_sent < 0) {
 					fprintf(stderr, "Error sending packet.\n");
